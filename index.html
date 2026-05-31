@@ -768,7 +768,8 @@ $("testConn").onclick = async () => {
   const j = await checkHealth();
   if (j.ok) {
     const proj = $("projectId").value.trim() || j.project || "(не определён)";
-    $("testResult").innerHTML = `<span style="color:var(--ok)">✅ ADC работает. Проект: ${escapeHtml(proj)}.</span>`;
+    const proxyLine = j.proxy ? `<br>Прокси: ${escapeHtml(j.proxy)}` : "<br>Прокси: не используется (прямое соединение)";
+    $("testResult").innerHTML = `<span style="color:var(--ok)">✅ ADC работает. Проект: ${escapeHtml(proj)}.${proxyLine}</span>`;
   } else {
     $("testResult").innerHTML = `<span style="color:var(--danger)">❌ ${escapeHtml(j.error || "нет доступа")}</span>`;
   }

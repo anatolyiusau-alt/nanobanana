@@ -16,6 +16,8 @@
 
 const http = require("http");
 const https = require("https");
+const net = require("net");
+const tls = require("tls");
 const fs = require("fs");
 const path = require("path");
 const { exec } = require("child_process");
@@ -29,6 +31,15 @@ const ENV_PROJECT =
   "";
 const ENV_LOCATION = process.env.VERTEX_LOCATION || "global";
 const ENV_MODEL = process.env.VERTEX_MODEL || "gemini-3-pro-image-preview";
+
+// Прокси: берём из переменных окружения; если их нет — позже попробуем gcloud config.
+const ENV_PROXY =
+  process.env.HTTPS_PROXY ||
+  process.env.https_proxy ||
+  process.env.HTTP_PROXY ||
+  process.env.http_proxy ||
+  process.env.NB_PROXY ||
+  "";
 
 const ROOT = __dirname;
 
@@ -101,6 +112,60 @@ async function resolveProject(provided) {
 }
 
 /* ============================================================
+   ОПРЕДЕЛЕНИЕ ПРОКСИ
+   Сначала переменные окружения, затем конфигурация gcloud
+   (gcloud config get-value proxy/*). Результат кэшируется.
+============================================================ */
+let proxyCache = undefined; // undefined = ещё не определяли
+
+async function resolveProxy() {
+  if (proxyCache !== undefined) return proxyCache;
+  if (ENV_PROXY) {
+    proxyCache = normalizeProxy(ENV_PROXY);
+    return proxyCache;
+  }
+  // Пробуем настройки прокси из gcloud (часто в корпоративной среде они заданы там).
+  try {
+    const [type, addr, port, user, pass] = await Promise.all([
+      runCmd("gcloud config get-value proxy/type").catch(() => ""),
+      runCmd("gcloud config get-value proxy/address").catch(() => ""),
+      runCmd("gcloud config get-value proxy/port").catch(() => ""),
+      runCmd("gcloud config get-value proxy/username").catch(() => ""),
+      runCmd("gcloud config get-value proxy/password").catch(() => ""),
+    ]);
+    const clean = (v) => (v && v !== "(unset)" ? v.trim() : "");
+    const a = clean(addr), p = clean(port);
+    if (a && p) {
+      const scheme = clean(type).includes("https") ? "https" : "http";
+      const auth = clean(user) ? `${encodeURIComponent(clean(user))}:${encodeURIComponent(clean(pass))}@` : "";
+      proxyCache = normalizeProxy(`${scheme}://${auth}${a}:${p}`);
+      return proxyCache;
+    }
+  } catch (_) {
+    /* ignore */
+  }
+  proxyCache = null;
+  return proxyCache;
+}
+
+function normalizeProxy(raw) {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw.includes("://") ? raw : `http://${raw}`);
+    return {
+      hostname: u.hostname,
+      port: parseInt(u.port || (u.protocol === "https:" ? "443" : "80"), 10),
+      tls: u.protocol === "https:",
+      username: u.username ? decodeURIComponent(u.username) : "",
+      password: u.password ? decodeURIComponent(u.password) : "",
+      href: `${u.protocol}//${u.hostname}:${u.port}`,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+/* ============================================================
    ВЫЗОВ VERTEX AI
 ============================================================ */
 function vertexHost(location) {
@@ -109,8 +174,54 @@ function vertexHost(location) {
     : `${location}-aiplatform.googleapis.com`;
 }
 
-function callVertex({ token, project, location, model, body }) {
+// Создаёт TLS-соединение к host:port. Если задан прокси — туннелирует
+// через HTTP CONNECT (стандартный способ доступа к HTTPS через корп-прокси).
+function createUpstreamSocket(host, port, proxy) {
   return new Promise((resolve, reject) => {
+    if (!proxy) {
+      const socket = tls.connect({ host, port, servername: host }, () => resolve(socket));
+      socket.once("error", reject);
+      return;
+    }
+    // Подключаемся к прокси (обычный TCP или TLS до самого прокси).
+    const toProxy = proxy.tls
+      ? tls.connect({ host: proxy.hostname, port: proxy.port, servername: proxy.hostname })
+      : net.connect({ host: proxy.hostname, port: proxy.port });
+
+    toProxy.once("error", reject);
+    toProxy.once(proxy.tls ? "secureConnect" : "connect", () => {
+      let head = `CONNECT ${host}:${port} HTTP/1.1\r\nHost: ${host}:${port}\r\n`;
+      if (proxy.username) {
+        const cred = Buffer.from(`${proxy.username}:${proxy.password}`).toString("base64");
+        head += `Proxy-Authorization: Basic ${cred}\r\n`;
+      }
+      head += "Connection: keep-alive\r\n\r\n";
+      toProxy.write(head);
+    });
+
+    let buf = "";
+    const onData = (chunk) => {
+      buf += chunk.toString("utf8");
+      const idx = buf.indexOf("\r\n\r\n");
+      if (idx === -1) return;
+      toProxy.removeListener("data", onData);
+      const statusLine = buf.split("\r\n")[0];
+      const m = statusLine.match(/\s(\d{3})\s/);
+      if (!m || m[1] !== "200") {
+        reject(new Error("Прокси отклонил CONNECT: " + statusLine.trim()));
+        toProxy.destroy();
+        return;
+      }
+      // Поверх туннеля поднимаем TLS до реального хоста Google.
+      const secure = tls.connect({ socket: toProxy, servername: host }, () => resolve(secure));
+      secure.once("error", reject);
+    };
+    toProxy.on("data", onData);
+  });
+}
+
+function callVertex({ token, project, location, model, body }) {
+  return new Promise(async (resolve, reject) => {
     const host = vertexHost(location);
     const reqPath =
       `/v1/projects/${encodeURIComponent(project)}` +
@@ -118,15 +229,30 @@ function callVertex({ token, project, location, model, body }) {
       `/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
 
     const payload = Buffer.from(JSON.stringify(body));
+
+    let proxy = null;
+    try {
+      proxy = await resolveProxy();
+    } catch (_) {
+      proxy = null;
+    }
+
     const options = {
       method: "POST",
       host,
+      port: 443,
       path: reqPath,
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         "Content-Length": payload.length,
       },
+      // Если есть прокси — пробрасываем уже готовый TLS-сокет через туннель.
+      createConnection: proxy
+        ? (_opts, cb) => {
+            createUpstreamSocket(host, 443, proxy).then((s) => cb(null, s), cb);
+          }
+        : undefined,
     };
 
     const req = https.request(options, (res) => {
@@ -143,10 +269,33 @@ function callVertex({ token, project, location, model, body }) {
         resolve({ status: res.statusCode, json });
       });
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      reject(decorateNetworkError(err, proxy));
+    });
     req.write(payload);
     req.end();
   });
+}
+
+// Делает сетевые ошибки понятнее для пользователя.
+function decorateNetworkError(err, proxy) {
+  const code = err && err.code ? err.code : "";
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return new Error(
+      "Не удалось разрешить адрес aiplatform.googleapis.com (DNS). " +
+        (proxy
+          ? "Прокси задан, но соединение не прошло — проверьте адрес/порт прокси."
+          : "Похоже, вы за корпоративным прокси/VPN. Укажите прокси: запустите сервер с переменной HTTPS_PROXY, например в Windows:\n  set HTTPS_PROXY=http://proxy.company.com:8080 && node server.js") +
+        " (" + code + ")"
+    );
+  }
+  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || code === "ECONNRESET") {
+    return new Error(
+      "Сетевое соединение с Vertex AI не установлено (" + code + "). " +
+        "Проверьте интернет/VPN" + (proxy ? " и настройки прокси." : " или укажите прокси через HTTPS_PROXY.")
+    );
+  }
+  return err;
 }
 
 /* ============================================================
@@ -208,12 +357,14 @@ async function handleHealth(req, res) {
   try {
     const token = await getAccessToken();
     const project = await resolveProject("");
+    const proxy = await resolveProxy();
     sendJSON(res, 200, {
       ok: true,
       hasToken: !!token,
       project: project || null,
       location: ENV_LOCATION,
       model: ENV_MODEL,
+      proxy: proxy ? proxy.href : null,
       message: project
         ? "ADC работает, проект определён."
         : "ADC работает, но проект не задан — укажите Project ID в настройках.",
@@ -353,6 +504,7 @@ server.listen(PORT, () => {
   console.log(`  Проект (env):     ${ENV_PROJECT || "(определяется через gcloud)"}`);
   console.log(`  Регион:           ${ENV_LOCATION}`);
   console.log(`  Модель:           ${ENV_MODEL}`);
+  console.log(`  Прокси (env):     ${ENV_PROXY || "(нет; попробую взять из gcloud config)"}`);
   console.log("  ───────────────────────────────────────────");
   console.log("  Откройте ссылку в браузере. Ctrl+C — остановить.\n");
 });
