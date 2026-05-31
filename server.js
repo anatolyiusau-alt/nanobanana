@@ -18,7 +18,7 @@ const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+const { exec } = require("child_process");
 
 /* ---------------- Конфигурация (через env или UI) ---------------- */
 const PORT = parseInt(process.env.PORT || "5173", 10);
@@ -38,15 +38,22 @@ const ROOT = __dirname;
 ============================================================ */
 let tokenCache = { token: null, expires: 0 };
 
-function runCmd(cmd, args) {
+// Запускаем команду через оболочку (exec), чтобы на Windows корректно
+// находился gcloud.cmd (PATHEXT). Во все команды передаются только
+// константные строки без пользовательского ввода — это безопасно.
+function runCmd(command) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 25000, windowsHide: true }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderr = (stderr || "").toString();
-        return reject(err);
+    exec(
+      command,
+      { timeout: 25000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stderr = (stderr || "").toString();
+          return reject(err);
+        }
+        resolve((stdout || "").toString().trim());
       }
-      resolve((stdout || "").toString().trim());
-    });
+    );
   });
 }
 
@@ -56,13 +63,13 @@ async function getAccessToken() {
   }
   // Пробуем сначала ADC-токен, затем токен активного аккаунта gcloud.
   const attempts = [
-    ["gcloud", ["auth", "application-default", "print-access-token"]],
-    ["gcloud", ["auth", "print-access-token"]],
+    "gcloud auth application-default print-access-token",
+    "gcloud auth print-access-token",
   ];
   let lastErr = null;
-  for (const [cmd, args] of attempts) {
+  for (const command of attempts) {
     try {
-      const token = await runCmd(cmd, args);
+      const token = await runCmd(command);
       if (token) {
         tokenCache = { token, expires: Date.now() + 50 * 60 * 1000 };
         return token;
@@ -74,9 +81,9 @@ async function getAccessToken() {
   const detail = lastErr && lastErr.stderr ? "\n" + lastErr.stderr.trim() : "";
   throw new Error(
     "Не удалось получить токен доступа через gcloud (ADC). " +
-      "Установите Google Cloud CLI и выполните настройку ADC:\n" +
-      "  bash <(curl -sSL https://storage.googleapis.com/cloud-samples-data/adc/setup_adc.sh)\n" +
-      "или:  gcloud auth application-default login" +
+      "Установите Google Cloud CLI и выполните вход:\n" +
+      "  gcloud auth application-default login\n" +
+      "(на Linux/Mac также подойдёт setup_adc.sh)" +
       detail
   );
 }
@@ -85,7 +92,7 @@ async function resolveProject(provided) {
   if (provided && provided.trim()) return provided.trim();
   if (ENV_PROJECT) return ENV_PROJECT;
   try {
-    const p = await runCmd("gcloud", ["config", "get-value", "project"]);
+    const p = await runCmd("gcloud config get-value project");
     if (p && p !== "(unset)") return p;
   } catch (_) {
     /* ignore */
