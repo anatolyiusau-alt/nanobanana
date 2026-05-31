@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>🍌 Nano Banana Studio — генерация изображений</title>
+<style>
+  :root {
+    --bg: #0d0f17;
+    --bg-soft: #151823;
+    --bg-card: #1b1f2e;
+    --bg-elev: #232838;
+    --border: #2c3244;
+    --text: #e7e9f0;
+    --text-dim: #9aa0b4;
+    --accent: #ffd23f;
+    --accent-2: #a06bff;
+    --accent-grad: linear-gradient(135deg, #ffd23f 0%, #ff9b3f 45%, #a06bff 100%);
+    --danger: #ff5d6c;
+    --ok: #34d399;
+    --radius: 14px;
+    --shadow: 0 10px 40px rgba(0,0,0,.45);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+    background:
+      radial-gradient(1200px 600px at 85% -10%, rgba(160,107,255,.18), transparent 60%),
+      radial-gradient(1000px 500px at -10% 0%, rgba(255,210,63,.12), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  a { color: var(--accent); }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 26px; border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 30;
+    backdrop-filter: blur(10px);
+    background: rgba(13,15,23,.72);
+  }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo .mark { font-size: 30px; filter: drop-shadow(0 2px 6px rgba(255,210,63,.4)); }
+  .logo h1 {
+    font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .2px;
+    background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .logo small { display: block; color: var(--text-dim); font-weight: 400; font-size: 12px; }
+  .header-actions { display: flex; gap: 10px; align-items: center; }
+  .key-status { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+  .dot.ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+
+  .btn {
+    border: 1px solid var(--border); background: var(--bg-elev); color: var(--text);
+    padding: 9px 14px; border-radius: 10px; font-size: 14px; transition: .15s; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn:hover { border-color: var(--accent-2); transform: translateY(-1px); }
+  .btn.primary {
+    background: var(--accent-grad); color: #1a1408; border: none; font-weight: 700;
+  }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.primary:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.4); transform: none; }
+  .btn.ghost { background: transparent; }
+  .btn.danger { color: var(--danger); border-color: rgba(255,93,108,.4); }
+  .btn.danger:hover { background: rgba(255,93,108,.12); }
+
+  /* ---------- Layout ---------- */
+  .layout { display: grid; grid-template-columns: 380px 1fr; gap: 24px; padding: 24px 26px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 940px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .panel.controls { position: sticky; top: 92px; align-self: start; }
+  @media (max-width: 940px) { .panel.controls { position: static; } }
+
+  .field { margin-bottom: 18px; }
+  .field > label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+
+  textarea, input[type=text], input[type=password], select {
+    width: 100%; background: var(--bg-soft); border: 1px solid var(--border); color: var(--text);
+    border-radius: 10px; padding: 12px; font-size: 14px; resize: vertical; outline: none; transition: .15s;
+  }
+  textarea:focus, input:focus, select:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(160,107,255,.15); }
+  textarea { min-height: 110px; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--bg-soft); color: var(--text-dim);
+    padding: 7px 11px; border-radius: 999px; font-size: 12.5px; transition: .15s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent-2); }
+
+  .grid-opts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .ratio-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .opt {
+    border: 1px solid var(--border); background: var(--bg-soft); color: var(--text-dim);
+    border-radius: 10px; padding: 9px 4px; font-size: 12px; text-align: center; transition: .15s; user-select: none;
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+  }
+  .opt:hover { color: var(--text); border-color: var(--accent-2); }
+  .opt.active { border-color: var(--accent); background: rgba(255,210,63,.12); color: var(--text); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .opt .shape { background: var(--text-dim); border-radius: 3px; transition: .15s; }
+  .opt.active .shape { background: var(--accent); }
+
+  .seg { display: flex; gap: 8px; }
+  .seg .opt { flex: 1; padding: 11px 4px; font-size: 13px; }
+
+  .count-row { display: flex; gap: 8px; }
+  .count-row .opt { flex: 1; padding: 10px; font-size: 15px; font-weight: 700; }
+
+  /* reference upload */
+  .dropzone {
+    border: 1.5px dashed var(--border); border-radius: 12px; padding: 18px; text-align: center;
+    color: var(--text-dim); font-size: 13px; transition: .15s; cursor: pointer;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent-2); background: rgba(160,107,255,.07); color: var(--text); }
+  .ref-thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .ref-thumb { position: relative; width: 58px; height: 58px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+  .ref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .ref-thumb button {
+    position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(0,0,0,.7); color: #fff; border: none; font-size: 12px; line-height: 1; display: flex; align-items: center; justify-content: center;
+  }
+
+  .generate-row { display: flex; gap: 10px; }
+  .generate-row .btn.primary { flex: 1; justify-content: center; padding: 14px; font-size: 15px; }
+
+  /* ---------- Results ---------- */
+  .results-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .results-head h2 { font-size: 16px; margin: 0; }
+  .muted { color: var(--text-dim); font-size: 13px; }
+
+  .img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; position: relative;
+    display: flex; flex-direction: column; transition: .15s;
+  }
+  .card:hover { border-color: var(--accent-2); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .card .imgwrap { aspect-ratio: 1; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-in; }
+  .card .imgwrap img { width: 100%; height: 100%; object-fit: contain; }
+  .card .meta { padding: 10px 12px; font-size: 11.5px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .tag { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; }
+  .card .actions { display: flex; gap: 6px; padding: 0 12px 12px; }
+  .card .actions .btn { padding: 7px 9px; font-size: 12px; flex: 1; justify-content: center; }
+
+  .placeholder { border: 1.5px dashed var(--border); border-radius: 14px; padding: 60px 20px; text-align: center; color: var(--text-dim); }
+  .placeholder .big { font-size: 46px; margin-bottom: 8px; }
+
+  /* skeleton */
+  .skeleton { aspect-ratio: 1; border-radius: 12px; background: linear-gradient(100deg, var(--bg-soft) 30%, var(--bg-elev) 50%, var(--bg-soft) 70%); background-size: 200% 100%; animation: shimmer 1.3s infinite; border: 1px solid var(--border); display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;}
+  @keyframes shimmer { to { background-position: -200% 0; } }
+
+  /* ---------- Modal ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(5,6,11,.78); backdrop-filter: blur(4px); z-index: 50; display: none; align-items: center; justify-content: center; padding: 24px; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); width: 100%; max-width: 520px; box-shadow: var(--shadow); }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-body { padding: 20px; }
+  .modal-foot { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+  .iconbtn { background: transparent; border: none; color: var(--text-dim); font-size: 22px; line-height: 1; }
+  .iconbtn:hover { color: var(--text); }
+  .hint { font-size: 12.5px; color: var(--text-dim); margin-top: 8px; }
+  .hint code { background: var(--bg-elev); padding: 1px 5px; border-radius: 5px; }
+
+  /* lightbox */
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 60; display: none; align-items: center; justify-content: center; flex-direction: column; padding: 20px; }
+  .lightbox.show { display: flex; }
+  .lightbox img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: 8px; }
+  .lightbox .lb-bar { margin-top: 14px; display: flex; gap: 10px; }
+  .lightbox .lb-close { position: absolute; top: 18px; right: 22px; font-size: 30px; color: #fff; background: none; border: none; }
+
+  /* toast */
+  #toasts { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .toast {
+    background: var(--bg-elev); border: 1px solid var(--border); color: var(--text); padding: 12px 18px; border-radius: 10px;
+    font-size: 13.5px; box-shadow: var(--shadow); max-width: 90vw; animation: pop .2s ease;
+  }
+  .toast.err { border-color: rgba(255,93,108,.5); }
+  .toast.ok { border-color: rgba(52,211,153,.5); }
+  @keyframes pop { from { transform: translateY(10px); opacity: 0; } }
+
+  .spinner { width: 16px; height: 16px; border: 2px solid rgba(26,20,8,.3); border-top-color: #1a1408; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: .4px; color: var(--text-dim); font-weight: 700; margin: 28px 0 14px; display: flex; align-items: center; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span class="mark">🍌</span>
+    <div>
+      <h1>Nano Banana Studio</h1>
+      <small>Gemini 3 Pro Image · генерация изображений</small>
+    </div>
+  </div>
+  <div class="header-actions">
+    <span class="key-status"><span class="dot" id="keyDot"></span><span id="keyLabel">ключ не задан</span></span>
+    <button class="btn ghost" id="openSettings">⚙️ Настройки</button>
+  </div>
+</header>
+
+<div class="layout">
+  <!-- ============ CONTROLS ============ -->
+  <div class="panel controls">
+    <div class="field">
+      <label for="prompt">Опишите изображение</label>
+      <textarea id="prompt" placeholder="Например: уютная кофейня в дождливый вечер, неоновые вывески, киберпанк, кинематографичный свет, детализация 8k"></textarea>
+    </div>
+
+    <div class="field">
+      <label>Быстрые пресеты</label>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <div class="field">
+      <label>Соотношение сторон</label>
+      <div class="ratio-grid" id="ratioGrid"></div>
+    </div>
+
+    <div class="field">
+      <label>Разрешение (качество)</label>
+      <div class="seg" id="sizeSeg"></div>
+      <div class="hint" id="sizeHint"></div>
+    </div>
+
+    <div class="field">
+      <label>Количество вариантов</label>
+      <div class="count-row" id="countRow"></div>
+    </div>
+
+    <div class="field">
+      <label>Референсы (для редактирования / стиля)</label>
+      <div class="dropzone" id="dropzone">
+        📎 Перетащите или нажмите, чтобы добавить картинки
+      </div>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden />
+      <div class="ref-thumbs" id="refThumbs"></div>
+    </div>
+
+    <div class="generate-row">
+      <button class="btn primary" id="generateBtn">✨ Сгенерировать</button>
+    </div>
+    <div class="hint" id="costHint" style="text-align:center;margin-top:10px;"></div>
+  </div>
+
+  <!-- ============ RESULTS ============ -->
+  <div>
+    <div class="panel">
+      <div class="results-head">
+        <h2>Результаты</h2>
+        <span class="muted" id="resultsMeta"></span>
+      </div>
+      <div id="resultsArea">
+        <div class="placeholder">
+          <div class="big">🖼️</div>
+          <div>Здесь появятся сгенерированные изображения.</div>
+          <div class="muted" style="margin-top:6px;">Введите промпт слева и нажмите «Сгенерировать».</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">
+      <span>🕓 История генераций</span>
+      <button class="btn danger ghost" id="clearHistory" style="font-size:12px;padding:5px 10px;">Очистить всё</button>
+    </div>
+    <div class="img-grid" id="historyGrid"></div>
+    <div class="placeholder" id="historyEmpty" style="display:none;">
+      <div class="muted">История пуста — сгенерированные изображения сохраняются здесь локально в браузере.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SETTINGS MODAL ============ -->
+<div class="overlay" id="settingsOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>⚙️ Настройки</h3>
+      <button class="iconbtn" id="closeSettings">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="apiKey">API-ключ Google Gemini</label>
+        <input type="password" id="apiKey" placeholder="AIza..." autocomplete="off" />
+        <div class="hint">
+          Получить ключ: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+          Ключ хранится только в вашем браузере (<code>localStorage</code>) и отправляется напрямую в Google.
+          Обычно начинается с <code>AIza</code>.
+        </div>
+      </div>
+      <div class="field">
+        <label for="modelSelect">Модель</label>
+        <select id="modelSelect">
+          <option value="gemini-3-pro-image-preview">Nano Banana Pro — gemini-3-pro-image-preview (платная, 1K/2K/4K)</option>
+          <option value="gemini-3.1-flash-image-preview">Nano Banana — gemini-3.1-flash-image-preview (быстрее/дешевле)</option>
+          <option value="gemini-2.5-flash-image-preview">gemini-2.5-flash-image-preview (старая)</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0;">
+        <button class="btn" id="testKey" style="width:100%;justify-content:center;">🔌 Проверить подключение</button>
+        <div class="hint" id="testResult"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="cancelSettings">Отмена</button>
+      <button class="btn primary" id="saveSettings">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ LIGHTBOX ============ -->
+<div class="lightbox" id="lightbox">
+  <button class="lb-close" id="lbClose">✕</button>
+  <img id="lbImg" alt="preview" />
+  <div class="lb-bar">
+    <button class="btn" id="lbDownload">💾 Скачать</button>
+    <button class="btn" id="lbReuse">🎯 В референсы</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   КОНФИГУРАЦИЯ
+============================================================ */
+const RATIOS = [
+  { v: "1:1",  w: 22, h: 22, label: "1:1" },
+  { v: "16:9", w: 28, h: 16, label: "16:9" },
+  { v: "9:16", w: 14, h: 26, label: "9:16" },
+  { v: "4:3",  w: 26, h: 20, label: "4:3" },
+  { v: "3:4",  w: 18, h: 24, label: "3:4" },
+  { v: "3:2",  w: 27, h: 18, label: "3:2" },
+  { v: "2:3",  w: 16, h: 24, label: "2:3" },
+  { v: "4:5",  w: 19, h: 24, label: "4:5" },
+  { v: "5:4",  w: 25, h: 20, label: "5:4" },
+  { v: "21:9", w: 30, h: 13, label: "21:9" },
+];
+
+const SIZES = [
+  { v: "1K", label: "1K", note: "~1024 px" },
+  { v: "2K", label: "2K", note: "~2048 px" },
+  { v: "4K", label: "4K", note: "~3840 px" },
+];
+
+const PRESETS = [
+  { name: "Full HD 1080p", ratio: "16:9", size: "2K", emoji: "🖥️" },
+  { name: "4K кино",        ratio: "16:9", size: "4K", emoji: "🎬" },
+  { name: "Сторис / Reels", ratio: "9:16", size: "2K", emoji: "📱" },
+  { name: "Квадрат",        ratio: "1:1",  size: "2K", emoji: "⬛" },
+  { name: "Портрет",        ratio: "4:5",  size: "2K", emoji: "🖼️" },
+  { name: "Ультраширокий",  ratio: "21:9", size: "4K", emoji: "🌅" },
+];
+
+/* ============================================================
+   СОСТОЯНИЕ
+============================================================ */
+const state = {
+  apiKey: localStorage.getItem("nb_api_key") || "",
+  model: localStorage.getItem("nb_model") || "gemini-3-pro-image-preview",
+  ratio: localStorage.getItem("nb_ratio") || "1:1",
+  size: localStorage.getItem("nb_size") || "2K",
+  count: parseInt(localStorage.getItem("nb_count") || "1", 10),
+  refs: [], // {mimeType, data(base64), dataUrl}
+};
+
+/* ============================================================
+   УТИЛИТЫ
+============================================================ */
+const $ = (id) => document.getElementById(id);
+
+function toast(msg, type = "") {
+  const el = document.createElement("div");
+  el.className = "toast " + type;
+  el.textContent = msg;
+  $("toasts").appendChild(el);
+  setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .4s"; setTimeout(() => el.remove(), 400); }, 4200);
+}
+
+function extFromMime(mime) {
+  if (!mime) return "png";
+  if (mime.includes("jpeg") || mime.includes("jpg")) return "jpg";
+  if (mime.includes("webp")) return "webp";
+  return "png";
+}
+
+function downloadDataUrl(dataUrl, filename) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function fileToRef(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const base64 = dataUrl.split(",")[1];
+      resolve({ mimeType: file.type || "image/png", data: base64, dataUrl });
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+   INDEXEDDB — история
+============================================================ */
+let db = null;
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("nanobanana", 1);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains("history")) {
+        d.createObjectStore("history", { keyPath: "id" });
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbAdd(item) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("history", "readwrite");
+    tx.objectStore("history").put(item);
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbGetAll() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("history", "readonly");
+    const req = tx.objectStore("history").getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbDelete(id) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("history", "readwrite");
+    tx.objectStore("history").delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+function dbClear() {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("history", "readwrite");
+    tx.objectStore("history").clear();
+    tx.oncomplete = resolve;
+    tx.onerror = (e) => reject(e.target.error);
+  });
+}
+
+/* ============================================================
+   GEMINI API
+============================================================ */
+async function generateImage(prompt, { signal } = {}) {
+  if (!state.apiKey) throw new Error("Не задан API-ключ. Откройте «Настройки».");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(state.model)}:generateContent`;
+
+  const parts = [{ text: prompt }];
+  for (const r of state.refs) {
+    parts.push({ inline_data: { mime_type: r.mimeType, data: r.data } });
+  }
+
+  const body = {
+    contents: [{ parts }],
+    generationConfig: {
+      responseModalities: ["TEXT", "IMAGE"],
+      imageConfig: { aspectRatio: state.ratio, imageSize: state.size },
+    },
+  };
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": state.apiKey },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  const json = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const msg = json?.error?.message || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  const cand = json?.candidates?.[0];
+  const outParts = cand?.content?.parts || [];
+  let image = null, text = "";
+  for (const p of outParts) {
+    if (p.inlineData || p.inline_data) {
+      const inline = p.inlineData || p.inline_data;
+      const mime = inline.mimeType || inline.mime_type || "image/png";
+      image = { mimeType: mime, dataUrl: `data:${mime};base64,${inline.data}` };
+    } else if (p.text) {
+      text += p.text;
+    }
+  }
+  if (!image) {
+    const reason = cand?.finishReason ? ` (причина: ${cand.finishReason})` : "";
+    throw new Error((text ? text : "Модель не вернула изображение") + reason);
+  }
+  return { image, text };
+}
+
+/* ============================================================
+   РЕНДЕР UI
+============================================================ */
+function renderPresets() {
+  const box = $("presets");
+  box.innerHTML = "";
+  PRESETS.forEach((p) => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.innerHTML = `${p.emoji} ${p.name}`;
+    b.title = `${p.ratio} · ${p.size}`;
+    b.onclick = () => { state.ratio = p.ratio; state.size = p.size; persist(); renderRatios(); renderSizes(); toast(`Пресет: ${p.name} (${p.ratio} · ${p.size})`); };
+    box.appendChild(b);
+  });
+}
+
+function renderRatios() {
+  const box = $("ratioGrid");
+  box.innerHTML = "";
+  RATIOS.forEach((r) => {
+    const b = document.createElement("button");
+    b.className = "opt" + (state.ratio === r.v ? " active" : "");
+    const shape = document.createElement("span");
+    shape.className = "shape";
+    shape.style.width = r.w + "px";
+    shape.style.height = r.h + "px";
+    const lbl = document.createElement("span");
+    lbl.textContent = r.label;
+    b.appendChild(shape); b.appendChild(lbl);
+    b.onclick = () => { state.ratio = r.v; persist(); renderRatios(); };
+    box.appendChild(b);
+  });
+}
+
+function renderSizes() {
+  const box = $("sizeSeg");
+  box.innerHTML = "";
+  SIZES.forEach((s) => {
+    const b = document.createElement("button");
+    b.className = "opt" + (state.size === s.v ? " active" : "");
+    b.innerHTML = `<span style="font-weight:700;font-size:15px;">${s.label}</span><span style="font-size:11px;">${s.note}</span>`;
+    b.onclick = () => { state.size = s.v; persist(); renderSizes(); };
+    box.appendChild(b);
+  });
+  const cur = SIZES.find((s) => s.v === state.size);
+  $("sizeHint").textContent = `Итоговый размер по длинной стороне: ${cur ? cur.note : ""} · соотношение ${state.ratio}`;
+}
+
+function renderCount() {
+  const box = $("countRow");
+  box.innerHTML = "";
+  [1, 2, 3, 4].forEach((n) => {
+    const b = document.createElement("button");
+    b.className = "opt" + (state.count === n ? " active" : "");
+    b.textContent = n;
+    b.onclick = () => { state.count = n; persist(); renderCount(); };
+    box.appendChild(b);
+  });
+}
+
+function renderRefs() {
+  const box = $("refThumbs");
+  box.innerHTML = "";
+  state.refs.forEach((r, i) => {
+    const d = document.createElement("div");
+    d.className = "ref-thumb";
+    d.innerHTML = `<img src="${r.dataUrl}" alt="ref"/><button title="Удалить">✕</button>`;
+    d.querySelector("button").onclick = () => { state.refs.splice(i, 1); renderRefs(); };
+    box.appendChild(d);
+  });
+}
+
+function updateKeyStatus() {
+  const has = !!state.apiKey;
+  $("keyDot").className = "dot" + (has ? " ok" : "");
+  $("keyLabel").textContent = has ? "ключ сохранён" : "ключ не задан";
+  $("costHint").innerHTML = state.model.includes("pro")
+    ? "⚠️ Nano Banana <b>Pro</b> — платная модель, нужен включённый billing."
+    : "Быстрая модель — дешевле и быстрее.";
+}
+
+function persist() {
+  localStorage.setItem("nb_ratio", state.ratio);
+  localStorage.setItem("nb_size", state.size);
+  localStorage.setItem("nb_count", String(state.count));
+}
+
+/* ============================================================
+   КАРТОЧКИ РЕЗУЛЬТАТОВ / ИСТОРИЯ
+============================================================ */
+function makeCard(item, { isHistory = false } = {}) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="imgwrap"><img src="${item.dataUrl}" alt="result"/></div>
+    <div class="meta">
+      <span class="tag">${item.ratio}</span>
+      <span class="tag">${item.size}</span>
+      <span class="tag" title="модель">${item.model.replace("-preview","").replace("gemini-","")}</span>
+    </div>
+    <div class="actions">
+      <button class="btn dl">💾 Скачать</button>
+      <button class="btn re">🎯 Референс</button>
+      ${isHistory ? '<button class="btn danger del">🗑️</button>' : ''}
+    </div>`;
+  card.querySelector(".imgwrap").onclick = () => openLightbox(item);
+  card.querySelector(".dl").onclick = () => downloadDataUrl(item.dataUrl, fileName(item));
+  card.querySelector(".re").onclick = () => reuseAsRef(item);
+  if (isHistory) {
+    card.querySelector(".del").onclick = async () => { await dbDelete(item.id); refreshHistory(); };
+  }
+  return card;
+}
+
+function fileName(item) {
+  const ext = extFromMime(item.mimeType || "image/png");
+  return `nanobanana_${item.ratio.replace(":","x")}_${item.size}_${item.id || Date.now()}.${ext}`;
+}
+
+async function reuseAsRef(item) {
+  const base64 = item.dataUrl.split(",")[1];
+  state.refs.push({ mimeType: item.mimeType || "image/png", data: base64, dataUrl: item.dataUrl });
+  renderRefs();
+  toast("Добавлено в референсы 🎯", "ok");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function refreshHistory() {
+  const items = await dbGetAll();
+  items.sort((a, b) => b.createdAt - a.createdAt);
+  const grid = $("historyGrid");
+  grid.innerHTML = "";
+  if (!items.length) { $("historyEmpty").style.display = "block"; return; }
+  $("historyEmpty").style.display = "none";
+  items.forEach((it) => grid.appendChild(makeCard(it, { isHistory: true })));
+}
+
+/* ============================================================
+   LIGHTBOX
+============================================================ */
+let lbItem = null;
+function openLightbox(item) {
+  lbItem = item;
+  $("lbImg").src = item.dataUrl;
+  $("lightbox").classList.add("show");
+}
+function closeLightbox() { $("lightbox").classList.remove("show"); lbItem = null; }
+$("lbClose").onclick = closeLightbox;
+$("lightbox").onclick = (e) => { if (e.target.id === "lightbox") closeLightbox(); };
+$("lbDownload").onclick = () => { if (lbItem) downloadDataUrl(lbItem.dataUrl, fileName(lbItem)); };
+$("lbReuse").onclick = () => { if (lbItem) { reuseAsRef(lbItem); closeLightbox(); } };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); $("settingsOverlay").classList.remove("show"); } });
+
+/* ============================================================
+   ГЕНЕРАЦИЯ (главный обработчик)
+============================================================ */
+let generating = false;
+async function onGenerate() {
+  if (generating) return;
+  const prompt = $("prompt").value.trim();
+  if (!prompt) { toast("Введите описание изображения", "err"); return; }
+  if (!state.apiKey) { toast("Сначала задайте API-ключ в настройках", "err"); openSettings(); return; }
+
+  generating = true;
+  const btn = $("generateBtn");
+  btn.disabled = true;
+  const area = $("resultsArea");
+  area.innerHTML = "";
+  const grid = document.createElement("div");
+  grid.className = "img-grid";
+  area.appendChild(grid);
+
+  // скелетоны
+  const skels = [];
+  for (let i = 0; i < state.count; i++) {
+    const sk = document.createElement("div");
+    sk.className = "skeleton";
+    sk.textContent = "генерация…";
+    grid.appendChild(sk);
+    skels.push(sk);
+  }
+
+  let done = 0;
+  for (let i = 0; i < state.count; i++) {
+    $("resultsMeta").textContent = `Генерация ${i + 1} из ${state.count}…`;
+    btn.innerHTML = `<span class="spinner"></span> ${i + 1}/${state.count}…`;
+    try {
+      const { image } = await generateImage(prompt);
+      const item = {
+        id: (Date.now() + "_" + Math.random().toString(36).slice(2, 7)),
+        dataUrl: image.dataUrl,
+        mimeType: image.mimeType,
+        prompt, model: state.model, ratio: state.ratio, size: state.size,
+        createdAt: Date.now(),
+      };
+      const card = makeCard(item);
+      grid.replaceChild(card, skels[i]);
+      done++;
+      try { await dbAdd(item); } catch (e) { console.warn("history save failed", e); }
+    } catch (err) {
+      skels[i].outerHTML = `<div class="skeleton" style="animation:none;color:var(--danger);text-align:center;padding:10px;">⚠️ ${escapeHtml(err.message)}</div>`;
+      toast("Ошибка: " + err.message, "err");
+    }
+  }
+
+  $("resultsMeta").textContent = done ? `Готово: ${done} из ${state.count}` : "Не удалось сгенерировать";
+  btn.disabled = false;
+  btn.innerHTML = "✨ Сгенерировать";
+  generating = false;
+  refreshHistory();
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* ============================================================
+   НАСТРОЙКИ
+============================================================ */
+function openSettings() {
+  $("apiKey").value = state.apiKey;
+  $("modelSelect").value = state.model;
+  $("testResult").textContent = "";
+  $("settingsOverlay").classList.add("show");
+}
+function closeSettings() { $("settingsOverlay").classList.remove("show"); }
+
+$("openSettings").onclick = openSettings;
+$("closeSettings").onclick = closeSettings;
+$("cancelSettings").onclick = closeSettings;
+$("settingsOverlay").onclick = (e) => { if (e.target.id === "settingsOverlay") closeSettings(); };
+
+$("saveSettings").onclick = () => {
+  state.apiKey = $("apiKey").value.trim();
+  state.model = $("modelSelect").value;
+  localStorage.setItem("nb_api_key", state.apiKey);
+  localStorage.setItem("nb_model", state.model);
+  updateKeyStatus();
+  closeSettings();
+  toast("Настройки сохранены ✅", "ok");
+};
+
+$("testKey").onclick = async () => {
+  const key = $("apiKey").value.trim();
+  const model = $("modelSelect").value;
+  if (!key) { $("testResult").textContent = "Введите ключ"; return; }
+  $("testResult").textContent = "Проверяю…";
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1`, {
+      headers: { "x-goog-api-key": key },
+    });
+    const j = await res.json().catch(() => ({}));
+    if (res.ok) {
+      $("testResult").innerHTML = '<span style="color:var(--ok)">✅ Ключ рабочий, подключение успешно.</span>';
+    } else {
+      $("testResult").innerHTML = '<span style="color:var(--danger)">❌ ' + escapeHtml(j?.error?.message || ("HTTP " + res.status)) + '</span>';
+    }
+  } catch (e) {
+    $("testResult").innerHTML = '<span style="color:var(--danger)">❌ ' + escapeHtml(e.message) + '</span>';
+  }
+};
+
+/* ============================================================
+   ЗАГРУЗКА РЕФЕРЕНСОВ
+============================================================ */
+const dz = $("dropzone");
+dz.onclick = () => $("fileInput").click();
+$("fileInput").onchange = async (e) => { await addFiles(e.target.files); e.target.value = ""; };
+["dragenter", "dragover"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("drag"); }));
+["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("drag"); }));
+dz.addEventListener("drop", async (e) => { await addFiles(e.dataTransfer.files); });
+async function addFiles(fileList) {
+  const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
+  for (const f of files) {
+    try { state.refs.push(await fileToRef(f)); } catch (e) { toast("Не удалось прочитать файл", "err"); }
+  }
+  renderRefs();
+}
+
+/* ============================================================
+   ПРОЧЕЕ
+============================================================ */
+$("generateBtn").onclick = onGenerate;
+$("clearHistory").onclick = async () => {
+  if (!confirm("Удалить всю историю генераций?")) return;
+  await dbClear();
+  refreshHistory();
+  toast("История очищена", "ok");
+};
+$("prompt").addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") onGenerate();
+});
+
+/* ============================================================
+   ИНИЦИАЛИЗАЦИЯ
+============================================================ */
+(async function init() {
+  renderPresets();
+  renderRatios();
+  renderSizes();
+  renderCount();
+  renderRefs();
+  updateKeyStatus();
+  try { await openDB(); await refreshHistory(); }
+  catch (e) { console.warn("IndexedDB недоступен", e); $("historyEmpty").style.display = "block"; }
+  if (!state.apiKey) setTimeout(openSettings, 400);
+})();
+</script>
+</body>
+</html>
