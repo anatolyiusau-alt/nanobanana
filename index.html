@@ -516,18 +516,18 @@ function dbClear() {
 /* ============================================================
    ВЫЗОВ ЛОКАЛЬНОГО БЭКЕНДА (он проксирует в Vertex AI)
 ============================================================ */
-async function generateImage(prompt) {
+async function generateImage(job) {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      prompt,
-      project: state.project,
-      location: state.location,
-      model: state.model,
-      aspectRatio: state.ratio,
-      imageSize: state.size,
-      refs: state.refs.map((r) => ({ mimeType: r.mimeType, data: r.data })),
+      prompt: job.prompt,
+      project: job.project,
+      location: job.location,
+      model: job.model,
+      aspectRatio: job.ratio,
+      imageSize: job.size,
+      refs: job.refs,
     }),
   });
 
@@ -682,57 +682,88 @@ $("lbReuse").onclick = () => { if (lbItem) { reuseAsRef(lbItem); closeLightbox()
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLightbox(); $("settingsOverlay").classList.remove("show"); } });
 
 /* ============================================================
-   ГЕНЕРАЦИЯ
+   ГЕНЕРАЦИЯ (параллельная — можно запускать новые, не дожидаясь)
 ============================================================ */
-let generating = false;
-async function onGenerate() {
-  if (generating) return;
+let activeJobs = 0;
+
+function ensureResultsGrid() {
+  let grid = $("resultsGrid");
+  if (!grid) {
+    $("resultsArea").innerHTML = "";
+    grid = document.createElement("div");
+    grid.className = "img-grid";
+    grid.id = "resultsGrid";
+    $("resultsArea").appendChild(grid);
+  }
+  return grid;
+}
+
+function updateGenStatus() {
+  if (activeJobs > 0) {
+    $("resultsMeta").innerHTML = `<span class="spinner dim"></span> в работе: ${activeJobs}`;
+  } else {
+    $("resultsMeta").textContent = "";
+  }
+}
+
+// Запуск — НЕ блокирует интерфейс. Делаем снимок настроек, чтобы
+// параллельные задачи с разными промптами не мешали друг другу.
+function onGenerate() {
   const prompt = $("prompt").value.trim();
   if (!prompt) { toast("Введите описание изображения", "err"); $("prompt").focus(); return; }
 
-  generating = true;
-  const btn = $("generateBtn");
-  btn.disabled = true;
+  const job = {
+    prompt,
+    project: state.project,
+    location: state.location,
+    model: state.model,
+    ratio: state.ratio,
+    size: state.size,
+    refs: state.refs.map((r) => ({ mimeType: r.mimeType, data: r.data })),
+  };
+  const count = state.count;
 
-  const area = $("resultsArea"); area.innerHTML = "";
-  const grid = document.createElement("div"); grid.className = "img-grid"; area.appendChild(grid);
+  const grid = ensureResultsGrid();
 
+  // Скелетоны новой задачи добавляем сверху, в естественном порядке вариантов.
+  const frag = document.createDocumentFragment();
   const skels = [];
-  for (let i = 0; i < state.count; i++) {
+  for (let i = 0; i < count; i++) {
     const sk = document.createElement("div");
     sk.className = "skeleton";
     sk.innerHTML = '<span class="spinner dim"></span> генерация…';
-    grid.appendChild(sk); skels.push(sk);
+    frag.appendChild(sk);
+    skels.push(sk);
   }
+  grid.insertBefore(frag, grid.firstChild);
 
-  let done = 0;
-  for (let i = 0; i < state.count; i++) {
-    $("resultsMeta").textContent = `Генерация ${i + 1} из ${state.count}…`;
-    btn.querySelector(".label").innerHTML = `<span class="spinner"></span> ${i + 1}/${state.count}…`;
-    try {
-      const image = await generateImage(prompt);
-      const item = {
-        id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
-        dataUrl: image.dataUrl, mimeType: image.mimeType,
-        prompt, model: state.model, ratio: state.ratio, size: state.size, createdAt: Date.now(),
-      };
-      grid.replaceChild(makeCard(item), skels[i]);
-      done++;
-      try { await dbAdd(item); } catch (_) {}
-    } catch (err) {
-      const ec = document.createElement("div");
-      ec.className = "err-card";
-      ec.innerHTML = `<div style="font-size:22px;">⚠️</div><div>${escapeHtml(err.message)}</div>`;
-      grid.replaceChild(ec, skels[i]);
-      toast("Ошибка: " + err.message, "err");
-    }
+  skels.forEach((sk) => runOne(job, sk));
+  toast(count > 1 ? `Запущено вариантов: ${count}` : "Генерация запущена 🍌", "ok");
+}
+
+async function runOne(job, skel) {
+  activeJobs++;
+  updateGenStatus();
+  try {
+    const image = await generateImage(job);
+    const item = {
+      id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+      dataUrl: image.dataUrl, mimeType: image.mimeType,
+      prompt: job.prompt, model: job.model, ratio: job.ratio, size: job.size, createdAt: Date.now(),
+    };
+    if (skel.parentNode) skel.parentNode.replaceChild(makeCard(item), skel);
+    try { await dbAdd(item); } catch (_) {}
+    refreshHistory();
+  } catch (err) {
+    const ec = document.createElement("div");
+    ec.className = "err-card";
+    ec.innerHTML = `<div style="font-size:22px;">⚠️</div><div>${escapeHtml(err.message)}</div>`;
+    if (skel.parentNode) skel.parentNode.replaceChild(ec, skel);
+    toast("Ошибка: " + err.message, "err");
+  } finally {
+    activeJobs--;
+    updateGenStatus();
   }
-
-  $("resultsMeta").textContent = done ? `Готово: ${done} из ${state.count}` : "Не удалось сгенерировать";
-  btn.disabled = false;
-  btn.querySelector(".label").innerHTML = "✨ Сгенерировать";
-  generating = false;
-  refreshHistory();
 }
 
 /* ============================================================
@@ -768,8 +799,7 @@ $("testConn").onclick = async () => {
   const j = await checkHealth();
   if (j.ok) {
     const proj = $("projectId").value.trim() || j.project || "(не определён)";
-    const proxyLine = j.proxy ? `<br>Прокси: ${escapeHtml(j.proxy)}` : "<br>Прокси: не используется (прямое соединение)";
-    $("testResult").innerHTML = `<span style="color:var(--ok)">✅ ADC работает. Проект: ${escapeHtml(proj)}.${proxyLine}</span>`;
+    $("testResult").innerHTML = `<span style="color:var(--ok)">✅ ADC работает. Проект: ${escapeHtml(proj)}.</span>`;
   } else {
     $("testResult").innerHTML = `<span style="color:var(--danger)">❌ ${escapeHtml(j.error || "нет доступа")}</span>`;
   }
