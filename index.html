@@ -183,8 +183,9 @@
     position: relative; display: flex; flex-direction: column; transition: .16s;
   }
   .card:hover { border-color: var(--accent-2); transform: translateY(-3px); box-shadow: var(--shadow-sm); }
-  .card .imgwrap { aspect-ratio: 1; background: #07080d; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-in; }
+  .card .imgwrap { position: relative; aspect-ratio: 1; background: #07080d; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-in; }
   .card .imgwrap img { width: 100%; height: 100%; object-fit: contain; }
+  .regen-overlay { position: absolute; inset: 0; background: rgba(7,8,13,.62); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; gap: 9px; color: var(--text); font-size: 12.5px; z-index: 2; }
   .card .meta { padding: 10px 12px 8px; font-size: 11.5px; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .tag { background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
   .card .actions { display: flex; gap: 6px; padding: 0 12px 12px; }
@@ -637,15 +638,59 @@ function makeCard(item, { isHistory = false } = {}) {
       <span class="tag" title="модель">${item.model.replace("-preview","").replace("gemini-","")}</span>
     </div>
     <div class="actions">
-      <button class="btn dl">💾 Скачать</button>
-      <button class="btn re">🎯 Референс</button>
-      ${isHistory ? '<button class="btn danger del">🗑️</button>' : ''}
+      <button class="btn dl" title="Скачать">💾</button>
+      <button class="btn rg" title="Перегенерировать с теми же настройками">🔄</button>
+      <button class="btn re" title="Использовать как референс">🎯</button>
+      ${isHistory ? '<button class="btn danger del" title="Удалить">🗑️</button>' : ''}
     </div>`;
   card.querySelector(".imgwrap").onclick = () => openLightbox(item);
   card.querySelector(".dl").onclick = () => downloadDataUrl(item.dataUrl, fileName(item));
+  card.querySelector(".rg").onclick = () => regenerate(item, card);
   card.querySelector(".re").onclick = () => reuseAsRef(item);
   if (isHistory) card.querySelector(".del").onclick = async () => { await dbDelete(item.id); refreshHistory(); };
   return card;
+}
+
+// Перегенерация: повторяет генерацию с теми же промптом/настройками/референсами
+// и заменяет изображение прямо в этой карточке (и в истории — по тому же id).
+async function regenerate(item, card) {
+  const rgBtn = card.querySelector(".rg");
+  if (rgBtn && rgBtn.disabled) return;
+  if (rgBtn) rgBtn.disabled = true;
+
+  const imgwrap = card.querySelector(".imgwrap");
+  const overlay = document.createElement("div");
+  overlay.className = "regen-overlay";
+  overlay.innerHTML = '<span class="spinner dim"></span> перегенерация…';
+  imgwrap.appendChild(overlay);
+
+  const job = {
+    prompt: item.prompt,
+    project: state.project,
+    location: state.location,
+    model: item.model,
+    ratio: item.ratio,
+    size: item.size,
+    refs: item.refs || [],
+  };
+
+  try {
+    const image = await generateImage(job);
+    // обновляем сам объект и его представление
+    item.dataUrl = image.dataUrl;
+    item.mimeType = image.mimeType;
+    item.createdAt = Date.now();
+    const img = imgwrap.querySelector("img");
+    if (img) img.src = image.dataUrl;
+    try { await dbAdd(item); } catch (_) {}   // тот же id → заменяет запись в истории
+    refreshHistory();
+    toast("Изображение перегенерировано 🔄", "ok");
+  } catch (err) {
+    toast("Ошибка перегенерации: " + err.message, "err");
+  } finally {
+    overlay.remove();
+    if (rgBtn) rgBtn.disabled = false;
+  }
 }
 
 function fileName(item) {
@@ -686,18 +731,6 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeLig
 ============================================================ */
 let activeJobs = 0;
 
-function ensureResultsGrid() {
-  let grid = $("resultsGrid");
-  if (!grid) {
-    $("resultsArea").innerHTML = "";
-    grid = document.createElement("div");
-    grid.className = "img-grid";
-    grid.id = "resultsGrid";
-    $("resultsArea").appendChild(grid);
-  }
-  return grid;
-}
-
 function updateGenStatus() {
   if (activeJobs > 0) {
     $("resultsMeta").innerHTML = `<span class="spinner dim"></span> в работе: ${activeJobs}`;
@@ -706,12 +739,13 @@ function updateGenStatus() {
   }
 }
 
-// Запуск — НЕ блокирует интерфейс. Делаем снимок настроек, чтобы
-// параллельные задачи с разными промптами не мешали друг другу.
+// Запуск НЕ блокирует интерфейс. Новый запуск очищает блок результатов —
+// предыдущие изображения уже сохранены и остаются в Истории.
 function onGenerate() {
   const prompt = $("prompt").value.trim();
   if (!prompt) { toast("Введите описание изображения", "err"); $("prompt").focus(); return; }
 
+  // снимок настроек на момент запуска
   const job = {
     prompt,
     project: state.project,
@@ -723,19 +757,21 @@ function onGenerate() {
   };
   const count = state.count;
 
-  const grid = ensureResultsGrid();
+  // Очищаем прошлые результаты (они уже в Истории) и создаём свежую сетку.
+  $("resultsArea").innerHTML = "";
+  const grid = document.createElement("div");
+  grid.className = "img-grid";
+  grid.id = "resultsGrid";
+  $("resultsArea").appendChild(grid);
 
-  // Скелетоны новой задачи добавляем сверху, в естественном порядке вариантов.
-  const frag = document.createDocumentFragment();
   const skels = [];
   for (let i = 0; i < count; i++) {
     const sk = document.createElement("div");
     sk.className = "skeleton";
     sk.innerHTML = '<span class="spinner dim"></span> генерация…';
-    frag.appendChild(sk);
+    grid.appendChild(sk);
     skels.push(sk);
   }
-  grid.insertBefore(frag, grid.firstChild);
 
   skels.forEach((sk) => runOne(job, sk));
   toast(count > 1 ? `Запущено вариантов: ${count}` : "Генерация запущена 🍌", "ok");
@@ -749,7 +785,8 @@ async function runOne(job, skel) {
     const item = {
       id: Date.now() + "_" + Math.random().toString(36).slice(2, 7),
       dataUrl: image.dataUrl, mimeType: image.mimeType,
-      prompt: job.prompt, model: job.model, ratio: job.ratio, size: job.size, createdAt: Date.now(),
+      prompt: job.prompt, model: job.model, ratio: job.ratio, size: job.size,
+      refs: job.refs, createdAt: Date.now(),
     };
     if (skel.parentNode) skel.parentNode.replaceChild(makeCard(item), skel);
     try { await dbAdd(item); } catch (_) {}
